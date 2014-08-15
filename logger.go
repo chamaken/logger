@@ -138,24 +138,45 @@ func NewLogger(out io.Writer, prefix string, flag int, priority Level) *Logger {
 	return &Logger{log.New(out, prefix, flag), LOG_UPTO(priority)}
 }
 
+func (l *Logger) Flags() int {
+	return l.logger.Flags()
+}
+func (l *Logger) Prefix() string {
+	return l.logger.Prefix()
+}
+func (l *Logger) Priority() Level {
+	// return Level(math.Log2(float64(^l.upto & (l.upto + 1))))
+	// http://stackoverflow.com/questions/2380728/getting-the-number-of-trailing-1-bits
+	b := int32(^l.upto & (l.upto + 1))            // this gives a 1 to the left of the trailing 1's
+	b--                                           // this gets us just the trailing 1's that need counting
+	b = (b & 0x55555555) + ((b>>1)  & 0x55555555) // 2 bit sums of 1 bit numbers
+	b = (b & 0x33333333) + ((b>>2)  & 0x33333333) // 4 bit sums of 2 bit numbers
+	b = (b & 0x0f0f0f0f) + ((b>>4)  & 0x0f0f0f0f) // 8 bit sums of 4 bit numbers
+	b = (b & 0x00ff00ff) + ((b>>8)  & 0x00ff00ff) // 16 bit sums of 8 bit numbers
+	b = (b & 0x0000ffff) + ((b>>16) & 0x0000ffff) // sum of 16 bit numbers
+	return Level(b)
+}
 func (l *Logger) SetFlags(flag int) {
 	l.logger.SetFlags(flag)
 }
 func (l *Logger) SetPrefix(prefix string) {
 	l.logger.SetPrefix(prefix)
 }
-func (l *Logger) SetLevel(priority Level) {
+func (l *Logger) SetPriority(priority Level) {
 	l.upto = LOG_UPTO(priority)
 }
 
 func (l *Logger) Panic(format string, v ...interface{}) {
-	l.logger.Panicf(fmt.Sprintf("[panic] %s", format), v...)
+	s := fmt.Sprintf("[panic] " + format, v...)
+	l.logger.Output(3, s)
+	panic(s)
 }
 func (l *Logger) Fatal(format string, v ...interface{}) {
-	l.logger.Fatalf(fmt.Sprintf("[fatal] %s", format), v...)
+	l.logger.Output(3, fmt.Sprintf("[fatal] " + format, v...))
+	os.Exit(1)
 }
 func (l *Logger) printf(format string, prio Level, v ...interface{}) {
-	l.logger.Printf(fmt.Sprintf("[%s] %s", Levels[prio], format), v...)
+	l.logger.Output(3, fmt.Sprintf(fmt.Sprintf("[%s] %s", Levels[prio], format), v...))
 }
 func (l *Logger) Emerg(format string, v ...interface{}) {
 	if l.upto & LOG_MASK(LOG_EMERG) != 0 { l.printf(format, LOG_EMERG, v...) }
@@ -183,60 +204,70 @@ func (l *Logger) Debug(format string, v ...interface{}) {
 }
 
 // function
-var upto int
 func init() {
-	upto = LOG_UPTO(LOG_ERR)
 	s := os.Getenv("GOLOGLEVEL")
 	for k, v := range(Levels) {
 		if strings.ToLower(s) == v {
-			upto = LOG_UPTO(k)
+			SetPriority(k)
+			break
 		}
 	}
 }
 
 func SetOutput(out io.Writer) {
-	log.SetOutput(out)
+	std = NewLogger(out, Prefix(), Flags(), Priority())
+}
+func Flags() int {
+	return std.Flags()
+}
+func Prefix() string {
+	return std.Prefix()
+}
+func Priority() Level {
+	return std.Priority()
 }
 func SetFlags(flag int) {
-	log.SetFlags(flag)
+	std.SetFlags(flag)
 }
 func SetPrefix(prefix string) {
-	log.SetPrefix(prefix)
+	std.SetPrefix(prefix)
 }
-func SetLevel(priority Level) {
-	upto = LOG_UPTO(priority)
+func SetPriority(priority Level) {
+	std.SetPriority(priority)
 }
 
+var std = NewLogger(os.Stderr, "", log.LstdFlags, LOG_ERR)
+
 func Panic(format string, v ...interface{}) {
-	log.Panicf(fmt.Sprintf("[panic] %s", format), v...)
+	s := fmt.Sprintf("[panic] " + format, v...)
+	std.logger.Output(3, s)
+	panic(s)
 }
 func Fatal(format string, v ...interface{}) {
-	log.Fatalf(fmt.Sprintf("[fatal] %s", format), v...)
-}
-func printf(format string, prio Level, v ...interface{}) {
-	log.Printf(fmt.Sprintf("[%s] %s", Levels[prio], format), v...)
+	std.logger.Output(3, fmt.Sprintf("[fatal] " + format, v...))
+	os.Exit(1)
 }
 func Emerg(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_EMERG) != 0 { printf(format, LOG_EMERG, v...) }
+	if std.upto & LOG_MASK(LOG_EMERG) != 0 { std.printf(format, LOG_EMERG, v...) }
 }
 func Alert(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_ALERT) != 0 { printf(format, LOG_ALERT, v...) }
+	if std.upto & LOG_MASK(LOG_ALERT) != 0 { std.printf(format, LOG_ALERT, v...) }
 }
 func Crit(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_CRIT) != 0 { printf(format, LOG_CRIT, v...) }
+	if std.upto & LOG_MASK(LOG_CRIT) != 0 { std.printf(format, LOG_CRIT, v...) }
 }
 func Error(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_ERR) != 0 { printf(format, LOG_ERR, v...) }
+	if std.upto & LOG_MASK(LOG_ERR) != 0 { std.printf(format, LOG_ERR, v...) }
 }
 func Warning(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_WARNING) != 0 { printf(format, LOG_WARNING, v...) }
+	if std.upto & LOG_MASK(LOG_WARNING) != 0 { std.printf(format, LOG_WARNING, v...) }
 }
 func Notice(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_NOTICE) != 0 { printf(format, LOG_NOTICE, v...) }
+	if std.upto & LOG_MASK(LOG_NOTICE) != 0 { std.printf(format, LOG_NOTICE, v...) }
 }
 func Info(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_INFO) != 0 { printf(format, LOG_INFO, v...) }
+	if std.upto & LOG_MASK(LOG_INFO) != 0 { std.printf(format, LOG_INFO, v...) }
 }
 func Debug(format string, v ...interface{}) {
-	if upto & LOG_MASK(LOG_DEBUG) != 0 { printf(format, LOG_DEBUG, v...) }
+	if std.upto & LOG_MASK(LOG_DEBUG) != 0 {  std.printf(format, LOG_DEBUG, v...) }
 }
